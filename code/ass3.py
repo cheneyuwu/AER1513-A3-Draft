@@ -88,7 +88,7 @@ class Estimator:
     self.hat_stds = np.ones((self.K, 6)) * np.sqrt(1e-4)
     # copy for initial prior values (opdated by optimize function)
     self.init_T_vk_i = np.zeros_like(self.hat_T_vk_i)
-    self.init_T_vk_i[...] = self.T_vk_i[...]
+    self.init_T_vk_i[...] = self.hat_T_vk_i[...]
     self.init_P = np.zeros_like(self.hat_P)
     self.init_P[...] = self.hat_P[...]
 
@@ -123,9 +123,7 @@ class Estimator:
       self.hat_P[k] = F @ self.hat_P[k - 1] @ F.T + npla.inv(Q_inv)
 
     # this is only for the initial error term
-    self.init_T_vk_i = np.zeros_like(self.hat_T_vk_i)
-    self.init_T_vk_i[...] = self.T_vk_i[...]
-    self.init_P = np.zeros_like(self.hat_P)
+    self.init_T_vk_i[...] = self.hat_T_vk_i[...]
     self.init_P[...] = self.hat_P[...]
 
   def optimize(self, k1=None, k2=None):
@@ -139,9 +137,7 @@ class Estimator:
       print('GN step: {}   eps: {}'.format(curr_iter, eps))
 
     # this is only for the initial error term
-    self.init_T_vk_i = np.zeros_like(self.hat_T_vk_i)
-    self.init_T_vk_i[...] = self.T_vk_i[...]
-    self.init_P = np.zeros_like(self.hat_P)
+    self.init_T_vk_i[...] = self.hat_T_vk_i[...]
     self.init_P[...] = self.hat_P[...]
 
   def update(self, k1=None, k2=None):
