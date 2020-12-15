@@ -4,6 +4,7 @@ import scipy.linalg as cpla
 
 import so3
 
+
 def Cr2T(C_a_b, r_b_a_b):
   """
   Vectorized but not broadcastable
@@ -20,6 +21,7 @@ def Cr2T(C_a_b, r_b_a_b):
   T_a_b[..., 3, 3] = 1
   return T_a_b
 
+
 def T2Cr(T_a_b):
   """
   Vectorized but not broadcastable
@@ -30,6 +32,7 @@ def T2Cr(T_a_b):
   C_a_b = T_a_b[..., :3, :3]
   r_b_a_b = -C_a_b.swapaxes(-2, -1) @ r_a_b_a
   return C_a_b, r_b_a_b
+
 
 def expm(x):
   if len(x.shape) == 2:
@@ -42,6 +45,7 @@ def expm(x):
       expx[i] = cpla.expm(x[i])
     expx.reshape(shape)
     return expx
+
 
 def logm(x):
   if len(x.shape) == 2:
@@ -77,6 +81,7 @@ def vee_op(x):
   x_vee[..., :3, :] = x[..., :3, 3:4]
   return x_vee
 
+
 def curly_wedge_op(x):
   """
   Vectorized
@@ -88,12 +93,13 @@ def curly_wedge_op(x):
   x_curly_wedge[..., :3, 3:] = so3.wedge_op(x[..., :3, :])
   return x_curly_wedge
 
+
 def odot_op(p):
   """
   Vectorized
     p: ...x4x1 vector
   """
-  eye = np.zeros(p.shape[:-2] + (3,3))
+  eye = np.zeros(p.shape[:-2] + (3, 3))
   eye[..., :, :] = np.eye(3)
   eps = p[..., :-1, :]
   eta = p[..., 3, 0]
@@ -113,6 +119,7 @@ def Ad(T):
   Ad_T[..., :3, 3:] = so3.cross_op(r) @ C
   return Ad_T
 
+
 if __name__ == "__main__":
   # test Cr2T
   C = np.zeros((5, 4, 3, 3))
@@ -120,5 +127,5 @@ if __name__ == "__main__":
   T = Cr2T(C, r)
   C = np.zeros((3, 3))
   r = np.zeros((3, 1))
-  T = Cr2T(C, r)  
+  T = Cr2T(C, r)
   print(T)
