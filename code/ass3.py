@@ -255,7 +255,8 @@ class Estimator:
     red = np.argwhere(num_meas < 3)
 
     fig = plt.figure()
-    fig.set_size_inches(20, 5)
+    fig.set_size_inches(8, 3)
+    fig.subplots_adjust(left=0.1, bottom=0.2)
     ax = fig.add_subplot(111)
     ax.scatter(self.t[green], num_meas[green], s=1, c='green')
     ax.scatter(self.t[red], num_meas[red], s=1, c='red')
