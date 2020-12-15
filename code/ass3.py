@@ -67,7 +67,7 @@ class Estimator:
     self.y_k_j = data["y_k_j"].transpose((1, 2, 0))[..., None]  # measurements (1900, 20, 4, 1)
     self.y_filter = np.where(self.y_k_j == -1, 0, 1)  # [..., 0, 0] # filter (1900, 20, 4, 1)
 
-    # TODO compute the values at each time step
+    # covariances
     w_var, v_var, y_var = data["w_var"], data["v_var"], data["y_var"]
     w_var_inv = np.reciprocal(w_var.squeeze())
     v_var_inv = np.reciprocal(v_var.squeeze())
@@ -111,9 +111,9 @@ class Estimator:
     k2 = self.k2 if k2 is None else k2
 
     # self.hat_T_vk_i[k1] = self.T_vk_i[k1]  # force to ground truth
-    # self.hat_P[k1] = 1e-3 * np.eye(6)
+    # self.hat_P[k1] = 1e-3 * np.eye(6)      # force to ground truth
     for k in range(k1 + 1, k2 + 1):
-      # TODO: need to check initialization, input time step is strange
+      # TODO: need to check initialization, input time step is strange (but same as in assignment)
       # mean
       self.hat_T_vk_i[k] = self.f(self.hat_T_vk_i[k - 1], self.varpi_vk_i_vk[k - 1], self.dt[k])
       # covariance
@@ -151,7 +151,7 @@ class Estimator:
     # First input factor
     # error
     T = self.hat_T_vk_i[k1]
-    T_prior = self.init_T_vk_i[k1]  # T_prior = self.T_vk_i[k1]
+    T_prior = self.init_T_vk_i[k1]
     e_v0 = self.e_v0(T_prior, T)
     # Jacobian
     H_v0 = np.zeros((6, (k2 - k1 + 1) * 6))
@@ -178,10 +178,9 @@ class Estimator:
     Q_inv = cpla.block_diag(*Q_inv)
 
     # Measurement errors
-    p = self.rho_i_pj_i[k1:k2 + 1]  # .reshape(-1, *self.rho_i_pj_i.shape[-2:])
-    y = self.y_k_j[k1:k2 + 1]  # .reshape(-1, *self.y_k_j.shape[-2:])
+    p = self.rho_i_pj_i[k1:k2 + 1]
+    y = self.y_k_j[k1:k2 + 1]
     T = np.repeat(self.hat_T_vk_i[k1:k2 + 1][:, None, ...], self.y_k_j.shape[1], axis=1)
-    # T = T.reshape(-1, *T.shape[-2:])
     # error
     e_y = self.e_y(y, p, T).reshape(-1, 1)
     # Jacobian
@@ -260,8 +259,8 @@ class Estimator:
     ax = fig.add_subplot(111)
     ax.scatter(self.t[green], num_meas[green], s=1, c='green')
     ax.scatter(self.t[red], num_meas[red], s=1, c='red')
-    ax.set_xlabel(r'time [$s$]')
-    ax.set_ylabel(r'number of visible landmarks')
+    ax.set_xlabel(r't [$s$]')
+    ax.set_ylabel(r'Number of Visible Landmarks')
     fig.savefig('num_visible.png')
     plt.show()
 
@@ -280,13 +279,25 @@ class Estimator:
     t = self.t[k1:k2 + 1]
     stds = self.hat_stds[k1:k2 + 1, :]
 
+    # plot landmarks for reference
+    num_meas = np.sum(self.y_filter[k1:k2 + 1, :, 0, 0], axis=-1)
+    green = np.argwhere(num_meas >= 3)
+    red = np.argwhere(num_meas < 3)
+
+    plot_number = 711
     fig = plt.figure()
-    fig.set_size_inches(7, 10)
-    fig.subplots_adjust(left=0.16, right=0.95, bottom=0.1, top=0.95, wspace=0.6, hspace=0.6)
+    fig.set_size_inches(8, 12)
+    fig.subplots_adjust(left=0.16, right=0.95, bottom=0.1, top=0.95, wspace=0.7, hspace=0.6)
+
+    plt.subplot(plot_number)
+    plt.scatter(t[green], num_meas[green], s=1, c='green')
+    plt.scatter(t[red], num_meas[red], s=1, c='red')
+    plt.xlabel(r't [$s$]')
+    plt.ylabel(r'Num. of Visible L.')
 
     labels = ['x', 'y', 'z']
     for i in range(3):
-      plt.subplot(611 + i)
+      plt.subplot(plot_number + 1 + i)
       plt.plot(t, trans_err[k1:k2 + 1, i].flatten(), '-', linewidth=1.0)
       plt.plot(t, 3 * stds[:, i], 'r--', linewidth=1.0)
       plt.plot(t, -3 * stds[:, i], 'g--', linewidth=1.0)
@@ -294,7 +305,7 @@ class Estimator:
       plt.xlabel(r"$t$ [$s$]")
       plt.ylabel(r"$\hat{r}_x - r_x$ [$m$]".replace("x", labels[i]))
     for i in range(3):
-      plt.subplot(614 + i)
+      plt.subplot(plot_number + 4 + i)
       plt.plot(t, rot_err[k1:k2 + 1, i].flatten(), '-', linewidth=1.0)
       plt.plot(t, 3 * stds[:, 3 + i], 'r--', linewidth=1.0)
       plt.plot(t, -3 * stds[:, 3 + i], 'g--', linewidth=1.0)
@@ -305,9 +316,6 @@ class Estimator:
     fig.savefig('{}.png'.format(filename))
     plt.show()
     plt.close()
-
-  # def get_estimate(self, k1=0, k2=None):
-  #   return self.hat_T_vk_i[k1:k2]
 
   def f(self, T, v, dt):
     """
@@ -326,6 +334,10 @@ class Estimator:
     return se3.expm(dt * se3.curly_wedge_op(v))
 
   def e_v0(self, T_prior, T):
+    """
+    Vectorized
+    initial error
+    """
     return se3.vee_op(se3.logm(T_prior @ npla.inv(T)))
 
   def e_v(self, T2, T, v, dt):
