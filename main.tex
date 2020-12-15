@@ -38,31 +38,31 @@ AER1513 Fall, 2020\\
 
 \section*{Question 1} 
 \textbf{TODO}\\
-As seen from Figure 2.5 in the assignment, all four sources of errors, i.e. range, bearing, translational speed and rotational speed errors, are clearly unimodal and have close-to-zero mean with a spread. Range error and translational speed error align well with the corresponding fitted Gaussian distributions. It looks like bearing error and rotational speed error have a lighter tail than the fitted Gaussian. Overall, the assumption of zero-mean Gaussian noise sounds reasonable. The standard deviation of each source of errors are given in the figure.
-\begin{eqnarray*}
-    \mat{Q}_k & = \begin{bmatrix} q^v_k & 0 \\ 0 & q^\omega_k \end{bmatrix} 
-                = \begin{bmatrix}
-                (0.066485)^2  & 0\\
-                0 & (0.090477)^2 
-              \end{bmatrix} \approx
-              \begin{bmatrix}
-                0.004420  & 0\\
-                0 & 0.008186
-              \end{bmatrix}
-              \\
-    \mat{R}_k^l & = \begin{bmatrix} r^r_k & 0 \\ 0 & r^b_k \end{bmatrix} 
-                = \begin{bmatrix}
-                (0.030006)^2  & 0\\
-                0 & (0.025912)^2
-              \end{bmatrix} \approx
-              \begin{bmatrix}
-                0.000900 & 0\\
-                0 & 0.000671 
-              \end{bmatrix}
-\end{eqnarray*}
-where $k = 0, ..., K$ and $l = 1, ..., L$.
+% As seen from Figure 2.5 in the assignment, all four sources of errors, i.e. range, bearing, translational speed and rotational speed errors, are clearly unimodal and have close-to-zero mean with a spread. Range error and translational speed error align well with the corresponding fitted Gaussian distributions. It looks like bearing error and rotational speed error have a lighter tail than the fitted Gaussian. Overall, the assumption of zero-mean Gaussian noise sounds reasonable. The standard deviation of each source of errors are given in the figure.
+% \begin{eqnarray*}
+%     \mat{Q}_k & = \begin{bmatrix} q^v_k & 0 \\ 0 & q^\omega_k \end{bmatrix} 
+%                 = \begin{bmatrix}
+%                 (0.066485)^2  & 0\\
+%                 0 & (0.090477)^2 
+%               \end{bmatrix} \approx
+%               \begin{bmatrix}
+%                 0.004420  & 0\\
+%                 0 & 0.008186
+%               \end{bmatrix}
+%               \\
+%     \mat{R}_k^l & = \begin{bmatrix} r^r_k & 0 \\ 0 & r^b_k \end{bmatrix} 
+%                 = \begin{bmatrix}
+%                 (0.030006)^2  & 0\\
+%                 0 & (0.025912)^2
+%               \end{bmatrix} \approx
+%               \begin{bmatrix}
+%                 0.000900 & 0\\
+%                 0 & 0.000671 
+%               \end{bmatrix}
+% \end{eqnarray*}
+% where $k = 0, ..., K$ and $l = 1, ..., L$.
 
-Note that in contrast to Assignment 1, we choose not to scale the noise $\mat{Q}_k$ by $T^2=0.01$ because we consider $T$ as part of the nonlinear motion model, and the noise $\vect{w}_k$ is affected by the model. We will discuss how it is affected later.
+% Note that in contrast to Assignment 1, we choose not to scale the noise $\mat{Q}_k$ by $T^2=0.01$ because we consider $T$ as part of the nonlinear motion model, and the noise $\vect{w}_k$ is affected by the model. We will discuss how it is affected later.
 
 \section*{Question 2}
 
@@ -227,6 +227,38 @@ Finally, we update our operating point thorugh the original perturbation scheme,
 \begin{equation}
     \mat{T}_{\text{op}, k} \leftarrow \exp\left( {\vect{\epsilon}_k^*}^{\wedge} \right) \mat{T}_{\text{op}, k}
 \end{equation}
+
+\section*{Question 4}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{code/num_visible.png}
+    \caption{Number of visible landmarks.}
+    \label{fig:4}
+\end{figure}
+
+\section*{Question 5}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{code/batch.png}
+    \caption{Batch.}
+    \label{fig:5a}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{code/sliding_window_50.png}
+    \caption{Sliding window 50.}
+    \label{fig:5b}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{code/sliding_window_10.png}
+    \caption{Sliding window 10.}
+    \label{fig:5c}
+\end{figure}
 
 
 \clearpage
