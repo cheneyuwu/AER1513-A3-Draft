@@ -1,3 +1,4 @@
+import time
 import os
 import numpy as np
 import numpy.linalg as npla
@@ -95,6 +96,9 @@ class Estimator:
     self.k1 = 0
     self.k2 = self.K - 1
 
+    # Timing
+    self.optimization_time = 0
+
   def set_interval(self, k1=None, k2=None):
     self.k1 = k1 if k1 != None else self.k1
     self.k2 = k2 if k2 != None else self.k2
@@ -130,11 +134,15 @@ class Estimator:
     k1 = self.k1 if k1 is None else k1
     k2 = self.k2 if k2 is None else k2
 
+    start_time = time.time()
+
     curr_iter, eps = 0, np.inf
     while curr_iter < 20 and eps > 1e-5:
       eps = self.update(k1, k2)
       curr_iter += 1
       print('GN step: {}   eps: {}'.format(curr_iter, eps))
+
+    self.optimization_time += time.time() - start_time
 
     # this is only for the initial error term
     self.init_T_vk_i[...] = self.hat_T_vk_i[...]
@@ -243,7 +251,7 @@ class Estimator:
     ax.set_ylim3d(0, 5)
     ax.set_zlim3d(0, 3)
     ax.legend()
-    plt.show()
+    # plt.show()
 
   def plot_num_visible_landmarks(self):
     num_meas = np.sum(self.y_filter[..., :, 0, 0], axis=-1)
@@ -259,7 +267,7 @@ class Estimator:
     ax.set_xlabel(r't [$s$]')
     ax.set_ylabel(r'Number of Visible Landmarks')
     fig.savefig('num_visible.png')
-    plt.show()
+    # plt.show()
 
   def plot_error(self, filename, k1=None, k2=None):
     k1 = self.k1 if k1 is None else k1
@@ -311,8 +319,8 @@ class Estimator:
       plt.ylabel(r"$\hat{\theta}_x - \theta_x$ [$rad$]".replace("x", labels[i]))
 
     fig.savefig('{}.png'.format(filename))
-    plt.show()
-    plt.close()
+    # plt.show()
+    # plt.close()
 
   def f(self, T, v, dt):
     """
@@ -398,6 +406,7 @@ if __name__ == "__main__":
   estimator.set_interval(1215, 1714)
   estimator.initialize()  # initialize with odometry
   estimator.optimize()
+  batch_time = estimator.optimization_time
   estimator.plot_error("batch")
 
   print('Q5(b) sliding window optimization with kappa=50')
@@ -415,6 +424,7 @@ if __name__ == "__main__":
     # initialize with odometry at the previous step
     estimator.initialize(k - 1)
     estimator.optimize()
+  sliding_50_time = estimator.optimization_time
   estimator.plot_error("sliding_window_50", k1, k2)
 
   print('Q5(b) sliding window optimization with kappa=10')
@@ -432,4 +442,10 @@ if __name__ == "__main__":
     # initialize with odometry at the previous step
     estimator.initialize(k - 1)
     estimator.optimize()
+  sliding_10_time = estimator.optimization_time
   estimator.plot_error("sliding_window_10", k1, k2)
+
+  print("Timing - ")
+  print("batch:                 ", batch_time)
+  print("sliding window k = 50: ", sliding_50_time)
+  print("sliding window k = 10: ", sliding_10_time)
