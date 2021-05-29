@@ -2,7 +2,6 @@ import time
 import os
 import numpy as np
 import numpy.linalg as npla
-from numpy.linalg import inv
 import scipy.linalg as cpla
 from scipy.io import loadmat
 import matplotlib
@@ -10,6 +9,9 @@ import matplotlib.pyplot as plt
 
 import so3
 import se3
+
+# from pylgmath import so3op, se3op, Transformation
+# from pysteam import state, problem, evaluator, solver
 
 ## Configure matplotlib
 matplotlib.use("TkAgg")
@@ -44,27 +46,27 @@ class Estimator:
     self.b = data["b"][0, 0]
 
     # stereo camera and imu
-    C_c_v, rho_v_c_v = data["C_c_v"], data["rho_v_c_v"]
-    self.T_c_v = se3.Cr2T(C_c_v, rho_v_c_v)
+    C_cv, rho_cv_inv = data["C_c_v"], data["rho_v_c_v"]
+    self.T_cv = se3.Cr2T(C_cv, rho_cv_inv)
 
     # ground truth values
-    r_i_vk_i = data["r_i_vk_i"].T[..., None]
-    C_vk_i = so3.psi_to_C(data["theta_vk_i"].T[..., None])
-    self.T_vk_i = se3.Cr2T(C_vk_i, r_i_vk_i)  # this is the ground truth
+    r_vi_ini = data["r_i_vk_i"].T[..., None]
+    C_vi = so3.psi_to_C(data["theta_vk_i"].T[..., None])
+    self.T_vi = se3.Cr2T(C_vi, r_vi_ini)  # this is the ground truth
 
     # inputs
-    w_vk_vk_i, v_vk_vk_i = data["w_vk_vk_i"].T, data["v_vk_vk_i"].T
-    self.varpi_vk_i_vk = np.concatenate([-v_vk_vk_i, -w_vk_vk_i], axis=-1)[..., None]
+    w_vi_inv, v_vi_inv = data["w_vk_vk_i"].T, data["v_vk_vk_i"].T
+    self.varpi_iv_inv = np.concatenate([-v_vi_inv, -w_vi_inv], axis=-1)[..., None]
     self.t = data["t"].squeeze()  # time steps (1900,)
     ts = np.roll(self.t, 1)
     ts[0] = 0
     self.dt = self.t - ts
 
     # measurements
-    rho_i_pj_i = data["rho_i_pj_i"].T[..., None]  # feature positions (20 x 3 x 1)
-    rho_i_pj_i = np.repeat(rho_i_pj_i[None, ...], self.K, axis=0)  # feature positions (1900, 20 x 3 x 1)
-    padding = np.ones(rho_i_pj_i.shape[:-2] + (1,) + rho_i_pj_i.shape[-1:])
-    self.rho_i_pj_i = np.concatenate((rho_i_pj_i, padding), axis=-2)
+    rho_pi_ini = data["rho_i_pj_i"].T[..., None]  # feature positions (20 x 3 x 1)
+    rho_pi_ini = np.repeat(rho_pi_ini[None, ...], self.K, axis=0)  # feature positions (1900, 20 x 3 x 1)
+    padding = np.ones(rho_pi_ini.shape[:-2] + (1,) + rho_pi_ini.shape[-1:])
+    self.rho_pi_ini = np.concatenate((rho_pi_ini, padding), axis=-2)  # feature positions (1900, 20 x 4 x 1)
     self.y_k_j = data["y_k_j"].transpose((1, 2, 0))[..., None]  # measurements (1900, 20, 4, 1)
     self.y_filter = np.where(self.y_k_j == -1, 0, 1)  # [..., 0, 0] # filter (1900, 20, 4, 1)
 
@@ -82,14 +84,14 @@ class Estimator:
     self.D = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]])
 
     # estimated values of variables
-    self.hat_T_vk_i = np.zeros_like(self.T_vk_i)
-    self.hat_T_vk_i[...] = self.T_vk_i[...]  # estimate of poses initialized to be ground truth
+    self.hat_T_vi = np.zeros_like(self.T_vi)
+    self.hat_T_vi[...] = self.T_vi[...]  # estimate of poses initialized to be ground truth
     self.hat_P = np.zeros((self.K, 6, 6))
     self.hat_P[..., :, :] = np.eye(6) * 1e-4
     self.hat_stds = np.ones((self.K, 6)) * np.sqrt(1e-4)
     # copy for initial prior values (opdated by optimize function)
-    self.init_T_vk_i = np.zeros_like(self.hat_T_vk_i)
-    self.init_T_vk_i[...] = self.hat_T_vk_i[...]
+    self.init_T_vi = np.zeros_like(self.hat_T_vi)
+    self.init_T_vi[...] = self.hat_T_vi[...]
     self.init_P = np.zeros_like(self.hat_P)
     self.init_P[...] = self.hat_P[...]
 
@@ -114,20 +116,20 @@ class Estimator:
     k1 = self.k1 if k1 is None else k1
     k2 = self.k2 if k2 is None else k2
 
-    # self.hat_T_vk_i[k1] = self.T_vk_i[k1]  # force to ground truth
+    # self.hat_T_vi[k1] = self.T_vi[k1]  # force to ground truth
     # self.hat_P[k1] = 1e-3 * np.eye(6)      # force to ground truth
     for k in range(k1 + 1, k2 + 1):
       # TODO: need to check initialization, input time step is strange (but same as in assignment)
       # mean
-      self.hat_T_vk_i[k] = self.f(self.hat_T_vk_i[k - 1], self.varpi_vk_i_vk[k - 1], self.dt[k])
+      self.hat_T_vi[k] = self.f(self.hat_T_vi[k - 1], self.varpi_iv_inv[k - 1], self.dt[k])
       # covariance
-      F = self.df(self.hat_T_vk_i[k - 1], self.varpi_vk_i_vk[k - 1], self.dt[k])
+      F = self.df(self.hat_T_vi[k - 1], self.varpi_iv_inv[k - 1], self.dt[k])
       Q_inv = self.Q_inv[k]
       Q_inv = Q_inv / (self.dt[k, None, None]**2)
       self.hat_P[k] = F @ self.hat_P[k - 1] @ F.T + npla.inv(Q_inv)
 
     # this is only for the initial error term
-    self.init_T_vk_i[...] = self.hat_T_vk_i[...]
+    self.init_T_vi[...] = self.hat_T_vi[...]
     self.init_P[...] = self.hat_P[...]
 
   def optimize(self, k1=None, k2=None):
@@ -145,7 +147,7 @@ class Estimator:
     self.optimization_time += time.time() - start_time
 
     # this is only for the initial error term
-    self.init_T_vk_i[...] = self.hat_T_vk_i[...]
+    self.init_T_vi[...] = self.hat_T_vi[...]
     self.init_P[...] = self.hat_P[...]
 
   def update(self, k1=None, k2=None):
@@ -154,8 +156,8 @@ class Estimator:
 
     # First input factor
     # error
-    T = self.hat_T_vk_i[k1]
-    T_prior = self.init_T_vk_i[k1]
+    T = self.hat_T_vi[k1]
+    T_prior = self.init_T_vi[k1]
     e_v0 = self.e_v0(T_prior, T)
     # Jacobian
     H_v0 = np.zeros((6, (k2 - k1 + 1) * 6))
@@ -164,9 +166,9 @@ class Estimator:
     P0_inv = npla.inv(self.init_P[k1])
 
     # Subsequent input errors
-    T = self.hat_T_vk_i[k1:k2]
-    T2 = self.hat_T_vk_i[k1 + 1:k2 + 1]
-    v = self.varpi_vk_i_vk[k1:k2]
+    T = self.hat_T_vi[k1:k2]
+    T2 = self.hat_T_vi[k1 + 1:k2 + 1]
+    v = self.varpi_iv_inv[k1:k2]
     dt = self.dt[k1 + 1:k2 + 1]
     # error
     e_v = self.e_v(T2, T, v, dt).reshape(-1, 1)
@@ -182,9 +184,9 @@ class Estimator:
     Q_inv = cpla.block_diag(*Q_inv)
 
     # Measurement errors
-    p = self.rho_i_pj_i[k1:k2 + 1]
+    p = self.rho_pi_ini[k1:k2 + 1]
     y = self.y_k_j[k1:k2 + 1]
-    T = np.repeat(self.hat_T_vk_i[k1:k2 + 1][:, None, ...], self.y_k_j.shape[1], axis=1)
+    T = np.repeat(self.hat_T_vi[k1:k2 + 1][:, None, ...], self.y_k_j.shape[1], axis=1)
     # error
     e_y = self.e_y(y, p, T).reshape(-1, 1)
     # Jacobian
@@ -220,9 +222,9 @@ class Estimator:
 
     # Update each pose
     # mean
-    T = self.hat_T_vk_i[k1:k2 + 1]
+    T = self.hat_T_vi[k1:k2 + 1]
     update = update.reshape(T.shape[0], 6, 1)
-    self.hat_T_vk_i[k1:k2 + 1] = se3.expm(se3.wedge_op(update)) @ T
+    self.hat_T_vi[k1:k2 + 1] = se3.expm(se3.wedge_op(update)) @ T
     # Covariance
     full_hat_P = npla.inv(LHS)
     self.hat_P[k1:k2 + 1] = np.array(
@@ -236,14 +238,14 @@ class Estimator:
     k1 = self.k1 if k1 is None else k1
     k2 = self.k2 if k2 is None else k2
 
-    C_vk_i, r_i_vk_i = se3.T2Cr(self.T_vk_i)
-    hat_C_vk_i, hat_r_i_vk_i = se3.T2Cr(self.hat_T_vk_i)
+    C_vi, r_vi_ini = se3.T2Cr(self.T_vi)
+    hat_C_vi, hat_r_vi_ini = se3.T2Cr(self.hat_T_vi)
 
     fig = plt.figure()
     fig.set_size_inches(10, 5)
     ax = fig.add_subplot(111, projection='3d')
-    ax.scatter(hat_r_i_vk_i[:, 0], hat_r_i_vk_i[:, 1], hat_r_i_vk_i[:, 2], s=0.1, c='blue', label='estimate')
-    ax.scatter(r_i_vk_i[:, 0], r_i_vk_i[:, 1], r_i_vk_i[:, 2], s=0.1, c='blue', label='ground truth')
+    ax.scatter(hat_r_vi_ini[:, 0], hat_r_vi_ini[:, 1], hat_r_vi_ini[:, 2], s=0.1, c='blue', label='estimate')
+    ax.scatter(r_vi_ini[:, 0], r_vi_ini[:, 1], r_vi_ini[:, 2], s=0.1, c='blue', label='ground truth')
     ax.set_xlabel('x [m]')
     ax.set_ylabel('y [m]')
     ax.set_zlabel('z [m]')
@@ -273,13 +275,13 @@ class Estimator:
     k1 = self.k1 if k1 is None else k1
     k2 = self.k2 if k2 is None else k2
 
-    C_vk_i, r_i_vk_i = se3.T2Cr(self.T_vk_i)
-    hat_C_vk_i, hat_r_i_vk_i = se3.T2Cr(self.hat_T_vk_i)
+    C_vi, r_vi_ini = se3.T2Cr(self.T_vi)
+    hat_C_vi, hat_r_vi_ini = se3.T2Cr(self.hat_T_vi)
 
-    eye = np.zeros_like(C_vk_i)
+    eye = np.zeros_like(C_vi)
     eye[..., :, :] = np.eye(3)
-    rot_err = so3.vee_op(eye - hat_C_vk_i @ npla.inv(C_vk_i))
-    trans_err = hat_r_i_vk_i - r_i_vk_i
+    rot_err = so3.vee_op(eye - hat_C_vi @ npla.inv(C_vi))
+    trans_err = hat_r_vi_ini - r_vi_ini
 
     t = self.t[k1:k2 + 1]
     stds = self.hat_stds[k1:k2 + 1, :]
@@ -364,7 +366,7 @@ class Estimator:
     Vectorized
     e matrix measurement
     """
-    z = self.D @ self.T_c_v @ T @ p
+    z = self.D @ self.T_cv @ T @ p
     g = np.zeros(z.shape[:-2] + (4, 1))
     g[..., 0, 0] = self.f_u * z[..., 0, 0] / z[..., 2, 0] + self.c_u
     g[..., 1, 0] = self.f_u * z[..., 1, 0] / z[..., 2, 0] + self.c_v
@@ -377,7 +379,7 @@ class Estimator:
     Vectorized
     G matrix measurement
     """
-    z = self.D @ self.T_c_v @ T @ p
+    z = self.D @ self.T_cv @ T @ p
     dgdz = np.zeros(z.shape[:-2] + (4, 3))
     dgdz[..., 0, 0] = self.f_u / z[..., 2, 0]
     dgdz[..., 0, 2] = -self.f_u * z[..., 0, 0] / (z[..., 2, 0]**2)
@@ -387,13 +389,13 @@ class Estimator:
     dgdz[..., 2, 2] = -self.f_u * (z[..., 0, 0] - self.b) / (z[..., 2, 0]**2)
     dgdz[..., 3, 1] = self.f_v / z[..., 2, 0]
     dgdz[..., 3, 2] = -self.f_v * z[..., 1, 0] / (z[..., 2, 0]**2)
-    dzdx = self.D @ self.T_c_v @ se3.odot_op(T @ p)
+    dzdx = self.D @ self.T_cv @ se3.odot_op(T @ p)
     return dgdz @ dzdx
 
 
 if __name__ == "__main__":
 
-  dataset = "/home/yuchen/Projects/AER1513-A3-Draft/code/dataset3.mat"
+  dataset = "/home/yuchen/ASRL/aer1513/AER1513-A3/code/dataset3.mat"
 
   # Plot valid measurements
   print('Q4 Plot valid measurements')
@@ -409,43 +411,43 @@ if __name__ == "__main__":
   batch_time = estimator.optimization_time
   estimator.plot_error("batch")
 
-  print('Q5(b) sliding window optimization with kappa=50')
-  k1 = 1215
-  k2 = 1714
-  kappa = 50
-  estimator = Estimator(dataset)
-  estimator.set_interval(k1, k1 + 50)
-  # initialize with odometry using ground truth
-  estimator.initialize()
-  estimator.optimize()
-  for k in range(k1 + 1, k2 + 1):
-    print('Current k =', k)
-    estimator.set_interval(k, k + 50)
-    # initialize with odometry at the previous step
-    estimator.initialize(k - 1)
-    estimator.optimize()
-  sliding_50_time = estimator.optimization_time
-  estimator.plot_error("sliding_window_50", k1, k2)
+  # print('Q5(b) sliding window optimization with kappa=50')
+  # k1 = 1215
+  # k2 = 1714
+  # kappa = 50
+  # estimator = Estimator(dataset)
+  # estimator.set_interval(k1, k1 + 50)
+  # # initialize with odometry using ground truth
+  # estimator.initialize()
+  # estimator.optimize()
+  # for k in range(k1 + 1, k2 + 1):
+  #   print('Current k =', k)
+  #   estimator.set_interval(k, k + 50)
+  #   # initialize with odometry at the previous step
+  #   estimator.initialize(k - 1)
+  #   estimator.optimize()
+  # sliding_50_time = estimator.optimization_time
+  # estimator.plot_error("sliding_window_50", k1, k2)
 
-  print('Q5(b) sliding window optimization with kappa=10')
-  k1 = 1215
-  k2 = 1714
-  kappa = 10
-  estimator = Estimator(dataset)
-  estimator.set_interval(k1, k1 + kappa)
-  # initialize with odometry using ground truth
-  estimator.initialize()
-  estimator.optimize()
-  for k in range(k1 + 1, k2 + 1):
-    print('Current k =', k)
-    estimator.set_interval(k, k + kappa)
-    # initialize with odometry at the previous step
-    estimator.initialize(k - 1)
-    estimator.optimize()
-  sliding_10_time = estimator.optimization_time
-  estimator.plot_error("sliding_window_10", k1, k2)
+  # print('Q5(b) sliding window optimization with kappa=10')
+  # k1 = 1215
+  # k2 = 1714
+  # kappa = 10
+  # estimator = Estimator(dataset)
+  # estimator.set_interval(k1, k1 + kappa)
+  # # initialize with odometry using ground truth
+  # estimator.initialize()
+  # estimator.optimize()
+  # for k in range(k1 + 1, k2 + 1):
+  #   print('Current k =', k)
+  #   estimator.set_interval(k, k + kappa)
+  #   # initialize with odometry at the previous step
+  #   estimator.initialize(k - 1)
+  #   estimator.optimize()
+  # sliding_10_time = estimator.optimization_time
+  # estimator.plot_error("sliding_window_10", k1, k2)
 
-  print("Timing - ")
-  print("batch:                 ", batch_time)
-  print("sliding window k = 50: ", sliding_50_time)
-  print("sliding window k = 10: ", sliding_10_time)
+  # print("Timing - ")
+  # print("batch:                 ", batch_time)
+  # print("sliding window k = 50: ", sliding_50_time)
+  # print("sliding window k = 10: ", sliding_10_time)
