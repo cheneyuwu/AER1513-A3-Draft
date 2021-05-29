@@ -7,10 +7,7 @@ from scipy.io import loadmat
 import matplotlib
 import matplotlib.pyplot as plt
 
-import so3
-import se3
-
-# from pylgmath import so3op, se3op, Transformation
+from pylgmath import so3op, se3op, Transformation
 # from pysteam import state, problem, evaluator, solver
 
 ## Configure matplotlib
@@ -47,12 +44,12 @@ class Estimator:
 
     # stereo camera and imu
     C_cv, rho_cv_inv = data["C_c_v"], data["rho_v_c_v"]
-    self.T_cv = se3.Cr2T(C_cv, rho_cv_inv)
+    self.T_cv = se3op.Cr2T(C_cv, -C_cv @ rho_cv_inv)
 
     # ground truth values
     r_vi_ini = data["r_i_vk_i"].T[..., None]
-    C_vi = so3.psi_to_C(data["theta_vk_i"].T[..., None])
-    self.T_vi = se3.Cr2T(C_vi, r_vi_ini)  # this is the ground truth
+    C_vi = so3op.vec2rot(data["theta_vk_i"].T[..., None]).swapaxes(-1, -2)
+    self.T_vi = se3op.Cr2T(C_vi, -C_vi @ r_vi_ini)  # this is the ground truth
 
     # inputs
     w_vi_inv, v_vi_inv = data["w_vk_vk_i"].T, data["v_vk_vk_i"].T
@@ -224,7 +221,7 @@ class Estimator:
     # mean
     T = self.hat_T_vi[k1:k2 + 1]
     update = update.reshape(T.shape[0], 6, 1)
-    self.hat_T_vi[k1:k2 + 1] = se3.expm(se3.wedge_op(update)) @ T
+    self.hat_T_vi[k1:k2 + 1] = se3op.vec2tran(update) @ T
     # Covariance
     full_hat_P = npla.inv(LHS)
     self.hat_P[k1:k2 + 1] = np.array(
@@ -238,8 +235,10 @@ class Estimator:
     k1 = self.k1 if k1 is None else k1
     k2 = self.k2 if k2 is None else k2
 
-    C_vi, r_vi_ini = se3.T2Cr(self.T_vi)
-    hat_C_vi, hat_r_vi_ini = se3.T2Cr(self.hat_T_vi)
+    C_vi, r_iv_inv = se3op.T2Cr(self.T_vi)
+    r_vi_ini = -C_vi.swapaxes(-2, -1) @ r_iv_inv
+    hat_C_vi, hat_r_iv_inv = se3op.T2Cr(self.hat_T_vi)
+    hat_r_vi_ini = -hat_C_vi.swapaxes(-2, -1) @ hat_r_iv_inv
 
     fig = plt.figure()
     fig.set_size_inches(10, 5)
@@ -275,12 +274,14 @@ class Estimator:
     k1 = self.k1 if k1 is None else k1
     k2 = self.k2 if k2 is None else k2
 
-    C_vi, r_vi_ini = se3.T2Cr(self.T_vi)
-    hat_C_vi, hat_r_vi_ini = se3.T2Cr(self.hat_T_vi)
+    C_vi, r_iv_inv = se3op.T2Cr(self.T_vi)
+    r_vi_ini = -C_vi.swapaxes(-2, -1) @ r_iv_inv
+    hat_C_vi, hat_r_iv_inv = se3op.T2Cr(self.hat_T_vi)
+    hat_r_vi_ini = -hat_C_vi.swapaxes(-2, -1) @ hat_r_iv_inv
 
     eye = np.zeros_like(C_vi)
     eye[..., :, :] = np.eye(3)
-    rot_err = so3.vee_op(eye - hat_C_vi @ npla.inv(C_vi))
+    rot_err = so3op.rot2vec(eye - hat_C_vi @ npla.inv(C_vi))
     trans_err = hat_r_vi_ini - r_vi_ini
 
     t = self.t[k1:k2 + 1]
@@ -330,7 +331,7 @@ class Estimator:
     motion model
     """
     dt = dt.reshape(-1, *([1] * len(v.shape[1:])))
-    return se3.expm(dt * se3.wedge_op(v)) @ T
+    return se3op.vec2tran(dt * v) @ T
 
   def df(self, T, v, dt):
     """
@@ -338,28 +339,28 @@ class Estimator:
     linearized motion model
     """
     dt = dt.reshape(-1, *([1] * len(v.shape[1:])))
-    return se3.expm(dt * se3.curly_wedge_op(v))
+    return se3op.vec2jacinv(dt * v)
 
   def e_v0(self, T_prior, T):
     """
     Vectorized
     initial error
     """
-    return se3.vee_op(se3.logm(T_prior @ npla.inv(T)))
+    return se3op.tran2vec(T_prior @ npla.inv(T))
 
   def e_v(self, T2, T, v, dt):
     """
     Vectorized
     the motion error given states at two time steps and input
     """
-    return se3.vee_op(se3.logm(self.f(T, v, dt) @ npla.inv(T2)))
+    return se3op.tran2vec(self.f(T, v, dt) @ npla.inv(T2))
 
   def F(self, T2, T, v, dt):
     """
     Vectorized
     F matrix between two poses
     """
-    return se3.Ad(T2 @ npla.inv(T))
+    return se3op.tranAd(T2 @ npla.inv(T))
 
   def e_y(self, y, p, T):
     """
@@ -389,7 +390,7 @@ class Estimator:
     dgdz[..., 2, 2] = -self.f_u * (z[..., 0, 0] - self.b) / (z[..., 2, 0]**2)
     dgdz[..., 3, 1] = self.f_v / z[..., 2, 0]
     dgdz[..., 3, 2] = -self.f_v * z[..., 1, 0] / (z[..., 2, 0]**2)
-    dzdx = self.D @ self.T_cv @ se3.odot_op(T @ p)
+    dzdx = self.D @ self.T_cv @ se3op.point2fs(T @ p)
     return dgdz @ dzdx
 
 
