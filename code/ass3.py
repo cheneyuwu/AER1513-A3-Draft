@@ -281,7 +281,7 @@ class Estimator:
 
     eye = np.zeros_like(C_vi)
     eye[..., :, :] = np.eye(3)
-    rot_err = so3op.rot2vec(eye - hat_C_vi @ npla.inv(C_vi))
+    rot_err = so3op.hatinv(eye - hat_C_vi @ npla.inv(C_vi))
     trans_err = hat_r_vi_ini - r_vi_ini
 
     t = self.t[k1:k2 + 1]
