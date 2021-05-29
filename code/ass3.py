@@ -1,5 +1,4 @@
 import time
-import os
 import numpy as np
 import numpy.linalg as npla
 import scipy.linalg as cpla
@@ -8,7 +7,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from pylgmath import so3op, se3op, Transformation
-# from pysteam import state, problem, evaluator, solver
+from pysteam import state, evaluator, problem, solver
 
 ## Configure matplotlib
 matplotlib.use("TkAgg")
@@ -93,7 +92,7 @@ class Estimator:
     self.init_P[...] = self.hat_P[...]
 
     self.k1 = 0
-    self.k2 = self.K - 1
+    self.k2 = self.K
 
     # Timing
     self.optimization_time = 0
@@ -114,8 +113,8 @@ class Estimator:
     k2 = self.k2 if k2 is None else k2
 
     # self.hat_T_vi[k1] = self.T_vi[k1]  # force to ground truth
-    # self.hat_P[k1] = 1e-3 * np.eye(6)      # force to ground truth
-    for k in range(k1 + 1, k2 + 1):
+    # self.hat_P[k1] = 1e-3 * np.eye(6)  # force to ground truth
+    for k in range(k1 + 1, k2):
       # TODO: need to check initialization, input time step is strange (but same as in assignment)
       # mean
       self.hat_T_vi[k] = self.f(self.hat_T_vi[k - 1], self.varpi_iv_inv[k - 1], self.dt[k])
@@ -157,47 +156,47 @@ class Estimator:
     T_prior = self.init_T_vi[k1]
     e_v0 = self.e_v0(T_prior, T)
     # Jacobian
-    H_v0 = np.zeros((6, (k2 - k1 + 1) * 6))
+    H_v0 = np.zeros((6, (k2 - k1) * 6))
     H_v0[:6, :6] = np.eye(6)
     # covariance
     P0_inv = npla.inv(self.init_P[k1])
 
     # Subsequent input errors
-    T = self.hat_T_vi[k1:k2]
-    T2 = self.hat_T_vi[k1 + 1:k2 + 1]
-    v = self.varpi_iv_inv[k1:k2]
-    dt = self.dt[k1 + 1:k2 + 1]
+    T = self.hat_T_vi[k1:k2 - 1]
+    T2 = self.hat_T_vi[k1 + 1:k2]
+    v = self.varpi_iv_inv[k1:k2 - 1]
+    dt = self.dt[k1 + 1:k2]
     # error
     e_v = self.e_v(T2, T, v, dt).reshape(-1, 1)
     # Jacobian
     F = self.F(T2, T, v, dt)
-    H_v = np.zeros(((k2 - k1) * 6, (k2 - k1 + 1) * 6))
+    H_v = np.zeros(((k2 - k1 - 1) * 6, (k2 - k1) * 6))
     for i in range(F.shape[0]):
       H_v[6 * i:6 * (i + 1), 6 * i:6 * (i + 1)] = -F[i]
       H_v[6 * i:6 * (i + 1), 6 * (i + 1):6 * (i + 2)] = np.eye(6)
     # covariance
-    Q_inv = self.Q_inv[k1 + 1:k2 + 1]
+    Q_inv = self.Q_inv[k1 + 1:k2]
     Q_inv = Q_inv / (dt[..., None, None]**2)
     Q_inv = cpla.block_diag(*Q_inv)
 
     # Measurement errors
-    p = self.rho_pi_ini[k1:k2 + 1]
-    y = self.y_k_j[k1:k2 + 1]
-    T = np.repeat(self.hat_T_vi[k1:k2 + 1][:, None, ...], self.y_k_j.shape[1], axis=1)
+    p = self.rho_pi_ini[k1:k2]
+    y = self.y_k_j[k1:k2]
+    T = np.repeat(self.hat_T_vi[k1:k2][:, None, ...], self.y_k_j.shape[1], axis=1)
     # error
     e_y = self.e_y(y, p, T).reshape(-1, 1)
     # Jacobian
     G = self.G(y, p, T)
-    H_y = np.zeros((np.prod(G.shape[0:3]), (k2 - k1 + 1) * 6))
+    H_y = np.zeros((np.prod(G.shape[0:3]), (k2 - k1) * 6))
     nrow = np.prod(G.shape[1:3])
     for i in range(G.shape[0]):
       H_y[nrow * i:nrow * (i + 1), 6 * i:6 * (i + 1)] = G[i].reshape(-1, 6)
     # covariance
-    R_inv = self.R_inv[k1:k2 + 1]
+    R_inv = self.R_inv[k1:k2]
     R_inv = R_inv.reshape(-1, 4, 4)
     R_inv = cpla.block_diag(*R_inv)
     # filter out invalid measurements
-    mask = self.y_filter[k1:k2 + 1].reshape(-1)
+    mask = self.y_filter[k1:k2].reshape(-1)
     mask = np.argwhere(mask).squeeze()
     e_y = e_y[mask]
     H_y = H_y[mask]
@@ -219,15 +218,15 @@ class Estimator:
 
     # Update each pose
     # mean
-    T = self.hat_T_vi[k1:k2 + 1]
+    T = self.hat_T_vi[k1:k2]
     update = update.reshape(T.shape[0], 6, 1)
-    self.hat_T_vi[k1:k2 + 1] = se3op.vec2tran(update) @ T
+    self.hat_T_vi[k1:k2] = se3op.vec2tran(update) @ T
     # Covariance
     full_hat_P = npla.inv(LHS)
-    self.hat_P[k1:k2 + 1] = np.array(
+    self.hat_P[k1:k2] = np.array(
         [full_hat_P[i * 6:(i + 1) * 6, i * 6:(i + 1) * 6] for i in range(int(full_hat_P.shape[0] / 6))])
     # for plotting
-    self.hat_stds[k1:k2 + 1] = (np.sqrt(np.diag(full_hat_P))).reshape((-1, 6))
+    self.hat_stds[k1:k2] = (np.sqrt(np.diag(full_hat_P))).reshape((-1, 6))
 
     return eps
 
@@ -284,11 +283,11 @@ class Estimator:
     rot_err = so3op.hatinv(eye - hat_C_vi @ npla.inv(C_vi))
     trans_err = hat_r_vi_ini - r_vi_ini
 
-    t = self.t[k1:k2 + 1]
-    stds = self.hat_stds[k1:k2 + 1, :]
+    t = self.t[k1:k2]
+    stds = self.hat_stds[k1:k2, :]
 
     # plot landmarks for reference
-    num_meas = np.sum(self.y_filter[k1:k2 + 1, :, 0, 0], axis=-1)
+    num_meas = np.sum(self.y_filter[k1:k2, :, 0, 0], axis=-1)
     green = np.argwhere(num_meas >= 3)
     red = np.argwhere(num_meas < 3)
 
@@ -306,7 +305,7 @@ class Estimator:
     labels = ['x', 'y', 'z']
     for i in range(3):
       plt.subplot(plot_number + 1 + i)
-      plt.plot(t, trans_err[k1:k2 + 1, i].flatten(), '-', linewidth=1.0)
+      plt.plot(t, trans_err[k1:k2, i].flatten(), '-', linewidth=1.0)
       plt.plot(t, 3 * stds[:, i], 'r--', linewidth=1.0)
       plt.plot(t, -3 * stds[:, i], 'g--', linewidth=1.0)
       plt.fill_between(t, -3 * stds[:, i], 3 * stds[:, i], alpha=0.2)
@@ -314,7 +313,7 @@ class Estimator:
       plt.ylabel(r"$\hat{r}_x - r_x$ [$m$]".replace("x", labels[i]))
     for i in range(3):
       plt.subplot(plot_number + 4 + i)
-      plt.plot(t, rot_err[k1:k2 + 1, i].flatten(), '-', linewidth=1.0)
+      plt.plot(t, rot_err[k1:k2, i].flatten(), '-', linewidth=1.0)
       plt.plot(t, 3 * stds[:, 3 + i], 'r--', linewidth=1.0)
       plt.plot(t, -3 * stds[:, 3 + i], 'g--', linewidth=1.0)
       plt.fill_between(t, -3 * stds[:, 3 + i], 3 * stds[:, 3 + i], alpha=0.2)
@@ -370,9 +369,9 @@ class Estimator:
     z = self.D @ self.T_cv @ T @ p
     g = np.zeros(z.shape[:-2] + (4, 1))
     g[..., 0, 0] = self.f_u * z[..., 0, 0] / z[..., 2, 0] + self.c_u
-    g[..., 1, 0] = self.f_u * z[..., 1, 0] / z[..., 2, 0] + self.c_v
+    g[..., 1, 0] = self.f_v * z[..., 1, 0] / z[..., 2, 0] + self.c_v
     g[..., 2, 0] = self.f_u * (z[..., 0, 0] - self.b) / z[..., 2, 0] + self.c_u
-    g[..., 3, 0] = self.f_u * z[..., 1, 0] / z[..., 2, 0] + self.c_v
+    g[..., 3, 0] = self.f_v * z[..., 1, 0] / z[..., 2, 0] + self.c_v
     return y - g
 
   def G(self, y, p, T):
@@ -406,7 +405,7 @@ if __name__ == "__main__":
   # Batch case
   print('Q5(a) batch optimization')
   estimator = Estimator(dataset)
-  estimator.set_interval(1215, 1714)
+  estimator.set_interval(1215, 1715)
   estimator.initialize()  # initialize with odometry
   estimator.optimize()
   batch_time = estimator.optimization_time
@@ -421,7 +420,7 @@ if __name__ == "__main__":
   # # initialize with odometry using ground truth
   # estimator.initialize()
   # estimator.optimize()
-  # for k in range(k1 + 1, k2 + 1):
+  # for k in range(k1 + 1, k2 ):
   #   print('Current k =', k)
   #   estimator.set_interval(k, k + 50)
   #   # initialize with odometry at the previous step
@@ -439,7 +438,7 @@ if __name__ == "__main__":
   # # initialize with odometry using ground truth
   # estimator.initialize()
   # estimator.optimize()
-  # for k in range(k1 + 1, k2 + 1):
+  # for k in range(k1 + 1, k2 ):
   #   print('Current k =', k)
   #   estimator.set_interval(k, k + kappa)
   #   # initialize with odometry at the previous step
