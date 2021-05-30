@@ -1,4 +1,5 @@
 import time
+import os.path as osp
 import numpy as np
 import numpy.linalg as npla
 import scipy.linalg as cpla
@@ -395,7 +396,7 @@ class Estimator:
 
 if __name__ == "__main__":
 
-  dataset = "/home/yuchen/ASRL/aer1513/AER1513-A3/code/dataset3.mat"
+  dataset = osp.join(osp.dirname(osp.abspath(__file__)), "dataset3.mat")
 
   # Plot valid measurements
   print('Q4 Plot valid measurements')
